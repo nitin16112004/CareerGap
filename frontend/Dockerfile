@@ -16,7 +16,7 @@ RUN VITE_API_URL="$PUBLIC_API_URL" \
     VITE_BILLING_ENABLED="$PUBLIC_BILLING_ENABLED" \
     npm run build
 
-FROM nginx:1.27-alpine AS runtime
+FROM nginx:1.29-alpine AS runtime
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/dist /usr/share/nginx/html
 EXPOSE 8080
