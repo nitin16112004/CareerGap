@@ -1,0 +1,80 @@
+envVarGroups:
+  - name: careerguid-ai-service-auth
+    envVars:
+      - key: AI_SERVICE_TOKEN
+        generateValue: true
+
+services:
+  - type: web
+    name: careerguid-api
+    runtime: docker
+    plan: free
+    autoDeployTrigger: checksPass
+    region: singapore
+    dockerContext: ./backend
+    dockerfilePath: ./backend/Dockerfile
+    healthCheckPath: /api/health/live
+    envVars:
+      - fromGroup: careerguid-ai-service-auth
+      - key: FRONTEND_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: AI_SERVICE_URL
+        sync: false
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: careerguid-queue
+          property: connectionString
+      - key: RUN_QUEUE_WORKERS
+        value: "true"
+      - key: TRUST_PROXY_HOPS
+        value: "1"
+      - key: AI_REQUEST_TIMEOUT_MS
+        value: "120000"
+      - key: SHUTDOWN_TIMEOUT_MS
+        value: "25000"
+      - key: EMAIL_PROVIDER
+        value: gmail
+      - key: REMINDER_CRON_TIMEZONE
+        value: Asia/Kolkata
+      - key: BILLING_ENABLED
+        value: "false"
+
+  - type: web
+    name: careerguid-ai
+    runtime: docker
+    plan: free
+    autoDeployTrigger: checksPass
+    region: singapore
+    dockerContext: ./ai-service
+    dockerfilePath: ./ai-service/Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - fromGroup: careerguid-ai-service-auth
+      - key: LLM_BASE_URL
+        value: https://generativelanguage.googleapis.com/v1beta/openai
+      - key: EMBEDDING_BASE_URL
+        value: https://generativelanguage.googleapis.com/v1beta
+      - key: RAG_EMBEDDING_DIMENSION
+        value: "1536"
+      - key: LLM_API_KEY
+        sync: false
+      - key: LLM_MODEL
+        sync: false
+      - key: EMBEDDING_API_KEY
+        sync: false
+      - key: EMBEDDING_MODEL
+        sync: false
+
+  - type: keyvalue
+    name: careerguid-queue
+    region: singapore
+    plan: free
+    ipAllowList: []
+    maxmemoryPolicy: noeviction

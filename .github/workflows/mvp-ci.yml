@@ -1,0 +1,127 @@
+name: Product CI
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main, dev, feat/mvp-backbone, feat/ats-v1-1, feat/rag-v1-2, feat/v1-3-hardening, feat/v1-4-reminders, feat/billing-upgrade, feat/admin-panel, feat/phase16-testing, feat/phase17-deployment]
+  push:
+    branches: [main, dev, fix/security-billing-rls, feat/mvp-backbone, feat/ats-v1-1, feat/rag-v1-2, feat/v1-3-hardening, feat/v1-4-reminders, feat/billing-upgrade, feat/admin-panel, feat/phase16-testing, feat/phase17-deployment]
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    env:
+      FRONTEND_URL: http://localhost:5173
+      SUPABASE_URL: https://test-project.supabase.co
+      SUPABASE_ANON_KEY: fixture-anon
+      SUPABASE_SERVICE_ROLE_KEY: fixture-service-role
+      REDIS_URL: redis://localhost:6379
+      AI_SERVICE_URL: http://localhost:8000
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Audit high-severity dependencies
+        # Audit the reproducible lockfile graph instead of the platform-specific
+        # installed tree. This keeps the security gate blocking on high severity
+        # findings while avoiding npm Quick Audit invalid-tree failures.
+        run: npm audit --package-lock-only --audit-level=high
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Test
+        run: npm test
+      - name: Build
+        run: npm run build
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Audit high-severity dependencies
+        # Audit the reproducible lockfile graph instead of the platform-specific
+        # installed tree. This keeps the security gate blocking on high severity
+        # findings while avoiding npm Quick Audit invalid-tree failures.
+        run: npm audit --package-lock-only --audit-level=high
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Test
+        run: npm test
+      - name: Build
+        run: npm run build
+
+  ai-service:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ai-service
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: ai-service/requirements.txt
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Dependency consistency
+        run: pip check
+      - name: Compile
+        run: python -m compileall -q app tests
+      - name: Test
+        run: pytest -q
+
+  infrastructure:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Validate development Compose model
+        run: docker compose config --quiet
+      - name: Validate hosted deployment settings
+        run: |
+          python3 -c 'import pathlib, tomllib; tomllib.loads(pathlib.Path("netlify.toml").read_text())'
+          ruby -ryaml -e 'config = YAML.load_file("render.yaml"); abort "Unexpected hosted service plans" unless config.fetch("services").map { |service| [service.fetch("type"), service.fetch("plan")] }.sort == [%w[keyvalue free], %w[web free], %w[web free]]'
+          VITE_API_URL=https://ci-api.onrender.com/api/v1 \
+          VITE_SUPABASE_URL=https://ci-project.supabase.co \
+          VITE_SUPABASE_ANON_KEY=sb_publishable_ci-placeholder \
+          node frontend/scripts/validate-netlify-env.mjs
+      - name: Build backend image
+        run: docker build -t careerguid-ai-backend:ci ./backend
+      - name: Build frontend image
+        run: docker build -t careerguid-ai-frontend:ci ./frontend
+      - name: Build AI service image
+        run: docker build -t careerguid-ai-service:ci ./ai-service
+      - name: Validate edge Nginx configuration
+        run: >-
+          docker run --rm
+          --add-host backend:127.0.0.1
+          --add-host frontend:127.0.0.1
+          -v "$PWD/infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro"
+          nginx:1.27-alpine nginx -t
