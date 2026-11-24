@@ -1,0 +1,142 @@
+.onboarding-shell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding: clamp(1rem, 4vw, 3rem) clamp(0.75rem, 4vw, 2.5rem);
+  background:
+    radial-gradient(ellipse at 18% 0%, rgb(79 70 229 / 20%), transparent 42rem),
+    radial-gradient(ellipse at 98% 30%, rgb(16 185 129 / 10%), transparent 35rem),
+    #07111f;
+}
+
+.onboarding-frame {
+  width: min(100%, 54rem);
+  min-width: 0;
+}
+
+.onboarding-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem 1.5rem;
+  margin-bottom: 1.25rem;
+}
+
+.onboarding-header .brand-logo {
+  align-self: flex-start;
+  color: #f8fafc;
+}
+
+.onboarding-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0.25rem;
+  border: 1px solid rgb(255 255 255 / 13%);
+  border-radius: 0.9rem;
+  background: rgb(255 255 255 / 5%);
+  list-style: none;
+}
+
+.onboarding-steps li {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: 0.65rem;
+  color: #b8c4d5;
+  font-size: 0.79rem;
+  font-weight: 600;
+  line-height: 1.18;
+}
+
+.onboarding-step-number {
+  display: grid;
+  flex: 0 0 auto;
+  width: 1.45rem;
+  height: 1.45rem;
+  place-items: center;
+  border: 1px solid rgb(203 213 225 / 22%);
+  border-radius: 50%;
+  font-size: 0.73rem;
+}
+
+.onboarding-steps [aria-current="step"] {
+  color: #fff;
+  background: #37358f;
+}
+
+.onboarding-steps [aria-current="step"] .onboarding-step-number {
+  border-color: #a5b4fc;
+  background: #eef2ff;
+  color: #3730a3;
+}
+
+.onboarding-steps .onboarding-step-done .onboarding-step-number {
+  color: #a7f3d0;
+  border-color: rgb(167 243 208 / 30%);
+  background: rgb(16 185 129 / 16%);
+}
+
+.onboarding-shell .auth-card {
+  max-width: 100%;
+}
+
+.onboarding-frame > .auth-card {
+  width: 100%;
+  padding: clamp(1.15rem, 3.7vw, 2.5rem);
+  border-radius: 1.4rem;
+}
+
+.onboarding-frame .auth-card h1 {
+  font-size: clamp(1.7rem, 4.2vw, 2.4rem);
+}
+
+.onboarding-frame .auth-card-heading p {
+  max-width: 52ch;
+}
+
+.onboarding-frame .onboarding-success-card .auth-card-heading p {
+  margin-inline: auto;
+}
+
+.onboarding-frame .resume-dropzone {
+  min-height: clamp(10rem, 27vh, 14rem);
+  padding: clamp(1rem, 3vw, 1.75rem);
+}
+
+@media (max-width: 48rem) {
+  .onboarding-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .onboarding-steps li {
+    justify-content: center;
+    gap: 0.35rem;
+    padding-inline: 0.3rem;
+  }
+
+  .onboarding-frame .review-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .onboarding-frame .resume-preview-card {
+    order: 0;
+  }
+}
+
+@media (max-width: 25rem) {
+  .onboarding-steps li {
+    font-size: 0.72rem;
+  }
+
+  .onboarding-step-number {
+    width: 1.25rem;
+    height: 1.25rem;
+  }
+}

@@ -1,0 +1,137 @@
+.workspace-shell {
+  --workspace-gutter: clamp(1rem, 3vw, 2.5rem);
+  display: grid;
+  grid-template-columns: 14rem minmax(0, 1fr);
+  align-items: start;
+  gap: var(--workspace-gutter);
+  width: min(100%, 92rem);
+  min-height: 100vh;
+  margin-inline: auto;
+  padding: var(--workspace-gutter);
+}
+
+.workspace-sidebar {
+  position: sticky;
+  top: var(--workspace-gutter);
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.85rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 1.25rem;
+  box-shadow: var(--shadow);
+}
+
+.workspace-sidebar nav {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.workspace-sidebar a,
+.workspace-signout {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: 2.75rem;
+  padding: 0.5rem 0.65rem;
+  border-radius: 0.65rem;
+  color: #334155;
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.25;
+  text-decoration: none;
+}
+
+.workspace-sidebar svg {
+  flex: 0 0 auto;
+}
+
+.workspace-sidebar nav a:hover,
+.workspace-signout:not(:disabled):hover {
+  background: #f5f5ff;
+  color: #3730a3;
+}
+
+.workspace-sidebar nav a[aria-current="page"] {
+  box-shadow: inset 0.2rem 0 0 var(--indigo);
+  background: #eef2ff;
+  color: #3730a3;
+  font-weight: 700;
+}
+
+.workspace-sidebar a:focus-visible,
+.workspace-signout:focus-visible {
+  outline: 2px solid #4f46e5;
+  outline-offset: 2px;
+}
+
+.workspace-sidebar .workspace-brand {
+  padding: 0.35rem;
+  font-family: "Space Grotesk", "DM Sans", sans-serif;
+  font-size: 1rem;
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  color: var(--ink);
+}
+
+.workspace-brand-mark {
+  display: grid;
+  flex: 0 0 2.25rem;
+  width: 2.25rem;
+  height: 2.25rem;
+  place-items: center;
+  border-radius: 0.65rem;
+  background: linear-gradient(145deg, #4338ca, #4f46e5);
+  color: #fff;
+}
+
+.workspace-signout {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.workspace-signout:disabled {
+  cursor: wait;
+  opacity: 0.75;
+}
+
+.workspace-content {
+  min-width: 0;
+}
+
+.workspace-content > .auth-card {
+  margin-inline: auto;
+}
+
+@media (max-width: 900px) {
+  .workspace-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .workspace-sidebar {
+    position: static;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .workspace-sidebar nav {
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .workspace-signout {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .workspace-sidebar-feedback {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 530px) {
+  .workspace-sidebar nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
