@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
+import httpx
 import pytest
 
 # GitHub Actions invokes the pytest console script. Make the ai-service root an
@@ -12,6 +14,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import app.main as main
+import app.rag as rag
 from app.rag import (
     ProviderConfigurationError,
     ProviderResponseError,
@@ -128,6 +131,47 @@ def test_generate_roadmap_returns_structured_week_contract(monkeypatch: pytest.M
     assert payload["roadmap"]["duration_weeks"] == 1
     assert payload["roadmap"]["weeks"][0]["week_number"] == 1
     assert payload["roadmap"]["weeks"][0]["tasks"][0]["resource_document_ids"] == ["doc-1"]
+
+
+@pytest.mark.parametrize(
+    ("failure", "status", "message"),
+    [
+        (httpx.ReadTimeout, 504, "AI roadmap provider timed out. Please try again."),
+        (httpx.ConnectError, 502, "AI roadmap provider could not be reached. Please try again."),
+    ],
+)
+def test_generate_roadmap_handles_provider_transport_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    failure: type[httpx.RequestError],
+    status: int,
+    message: str,
+) -> None:
+    def fail(request: httpx.Request) -> httpx.Response:
+        raise failure("private underlying transport details", request=request)
+
+    def provider_client(**kwargs) -> httpx.Client:
+        return httpx.Client(transport=httpx.MockTransport(fail), **kwargs)
+
+    monkeypatch.setenv("LLM_API_KEY", "example-llm-key")
+    monkeypatch.setenv("LLM_MODEL", "example-llm-model")
+    monkeypatch.setattr(rag, "httpx", SimpleNamespace(
+        Client=provider_client,
+        TimeoutException=httpx.TimeoutException,
+        RequestError=httpx.RequestError,
+    ))
+    response = client.post("/generate-roadmap", json={
+        "target_role": "Backend Engineer",
+        "missing_skills": ["PostgreSQL"],
+        "documents": [{
+            "id": "doc-1",
+            "title": "PostgreSQL fundamentals",
+            "category": "database",
+            "content": "Practice relational modelling and SQL queries.",
+        }],
+    })
+
+    assert response.status_code == status
+    assert response.json() == {"detail": message}
 
 
 def test_provider_timeout_is_bounded_and_recovers_from_invalid_configuration(monkeypatch: pytest.MonkeyPatch) -> None:

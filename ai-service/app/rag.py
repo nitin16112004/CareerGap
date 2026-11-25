@@ -22,6 +22,10 @@ class ProviderResponseError(RuntimeError):
     pass
 
 
+class ProviderTimeoutError(ProviderResponseError):
+    pass
+
+
 class EmbeddingRequest(BaseModel):
     input: str = Field(min_length=3, max_length=12000)
 
@@ -213,12 +217,17 @@ def generate_roadmap(request: RoadmapGenerationRequest) -> RoadmapGenerationResp
         "response_format": {"type": "json_object"},
     }
 
-    with httpx.Client(timeout=_provider_timeout()) as client:
-        response = client.post(
-            f"{base_url}/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json=request_body,
-        )
+    try:
+        with httpx.Client(timeout=_provider_timeout()) as client:
+            response = client.post(
+                f"{base_url}/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json=request_body,
+            )
+    except httpx.TimeoutException as error:
+        raise ProviderTimeoutError("AI roadmap provider timed out. Please try again.") from error
+    except httpx.RequestError as error:
+        raise ProviderResponseError("AI roadmap provider could not be reached. Please try again.") from error
 
     if response.status_code >= 400:
         raise ProviderResponseError(f"LLM provider returned HTTP {response.status_code}")

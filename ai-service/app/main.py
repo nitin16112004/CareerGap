@@ -13,6 +13,7 @@ from .rag import (
     EmbeddingResponse,
     ProviderConfigurationError,
     ProviderResponseError,
+    ProviderTimeoutError,
     RoadmapGenerationRequest,
     RoadmapGenerationResponse,
     create_embedding,
@@ -116,6 +117,8 @@ def generate_rag_roadmap(request: RoadmapGenerationRequest) -> RoadmapGeneration
         return generate_roadmap(request)
     except ProviderConfigurationError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
+    except ProviderTimeoutError as error:
+        raise HTTPException(status_code=504, detail=str(error)) from error
     except ProviderResponseError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
     except ValidationError as error:
