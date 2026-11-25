@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { App } from "../../App";
 import { ResumeUploadPage } from "./ResumeUploadPage";
 import { ReviewProfilePage } from "./ReviewProfilePage";
@@ -106,7 +106,10 @@ const profile = {
 const renderUpload = () => render(<MemoryRouter><ResumeUploadPage /></MemoryRouter>);
 const renderReview = (path = `/onboarding/review-profile?resumeId=${resumeId}`) => render(
   <MemoryRouter initialEntries={[path]}>
-    <ReviewProfilePage />
+    <Routes>
+      <Route path="/onboarding/review-profile" element={<ReviewProfilePage />} />
+      <Route path="/onboarding/success" element={<h1>Onboarding complete</h1>} />
+    </Routes>
   </MemoryRouter>,
 );
 
@@ -190,10 +193,11 @@ describe("resume upload onboarding", () => {
     renderReview("/onboarding/review-profile?manual=true");
     fireEvent.click(await screen.findByRole("button", { name: /complete onboarding/i }));
 
-    await waitFor(() => expect(mocked.completeProfile).toHaveBeenCalledWith(expect.objectContaining({
+    expect(await screen.findByRole("heading", { name: "Onboarding complete" })).toBeInTheDocument();
+    expect(mocked.completeProfile).toHaveBeenCalledWith(expect.objectContaining({
       fullName: "Ava Stone",
       fieldSources: expect.objectContaining({ full_name: "manual", skills: "manual" }),
-    })));
+    }));
     expect(mocked.completeProfile.mock.calls[0][0]).not.toHaveProperty("resumeId");
     expect(mocked.get).not.toHaveBeenCalled();
     expect(mocked.update).not.toHaveBeenCalled();
