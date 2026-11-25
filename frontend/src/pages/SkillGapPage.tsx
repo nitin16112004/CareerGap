@@ -1,5 +1,5 @@
 import { ArrowRight, CheckCircle2, CircleDashed, Crown, Sparkles, Target, TriangleAlert } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { AuthCard } from "../components/auth/AuthCard";
 import { ErrorMessage, SuccessMessage } from "../components/auth/FeedbackMessage";
@@ -24,6 +24,8 @@ export const SkillGapPage = (): JSX.Element => {
   const [roleId, setRoleId] = useState("");
   const [analysis, setAnalysis] = useState<SkillAnalysis | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const [catalogError, setCatalogError] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [generatingMode, setGeneratingMode] = useState<"rag" | "basic_template" | null>(null);
   const [generationError, setGenerationError] = useState("");
@@ -33,20 +35,31 @@ export const SkillGapPage = (): JSX.Element => {
 
   useEffect(() => {
     let active = true;
-    void Promise.all([skillGapService.listRoles(), skillGapService.latest()])
-      .then(([roleData, latest]) => {
-        if (!active) return;
-        setRoles(roleData); setAnalysis(latest);
-        if (latest?.role_id) setRoleId(latest.role_id);
-        else if (latest?.job_roles?.id) setRoleId(latest.job_roles.id);
-      })
-      .catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : "Unable to load skill-gap data."); })
-      .finally(() => { if (active) setLoading(false); });
+    void Promise.allSettled([skillGapService.listRoles(), skillGapService.latest()]).then(([catalog, history]) => {
+      if (!active) return;
+      const availableRoles = catalog.status === "fulfilled" ? catalog.value : [];
+      const latest = history.status === "fulfilled" ? history.value : null;
+      const previousRoleId = latest?.role_id ?? latest?.role?.id ?? latest?.job_roles?.id;
+      setRoles(availableRoles);
+      setCatalogError(catalog.status === "rejected");
+      setRoleId(availableRoles.find((role) => role.id === previousRoleId)?.id ?? "");
+      if (history.status === "fulfilled") setAnalysis(latest);
+      else setError("Your previous analysis could not be loaded. You can run a new analysis.");
+      setLoading(false);
+    });
     return () => { active = false; };
-  }, []);
+  }, [loadAttempt]);
 
-  const selectedRole = useMemo(() => roles.find((role) => role.id === roleId) ?? analysis?.role ?? analysis?.job_roles ?? null, [analysis, roleId, roles]);
+  const selectedRole = roles.find((role) => role.id === roleId);
+  const analyzedRoleId = analysis?.role_id ?? analysis?.role?.id ?? analysis?.job_roles?.id;
+  const analyzedRole = analysis?.role ?? analysis?.job_roles ?? roles.find((role) => role.id === analyzedRoleId);
   const learningOrder = priorityList(analysis);
+
+  const retryCatalog = (): void => {
+    setLoading(true);
+    setError("");
+    setLoadAttempt((attempt) => attempt + 1);
+  };
 
   const analyze = async (): Promise<void> => {
     if (!roleId) { setError("Select a target role before running the analysis."); return; }
@@ -58,7 +71,7 @@ export const SkillGapPage = (): JSX.Element => {
     finally { setAnalyzing(false); }
   };
 
-  const roadmapInput = (): { skillAnalysisId: string; roleId?: string; roleName?: string } | null => analysis ? { skillAnalysisId: analysis.id, roleId: analysis.role_id || roleId || undefined, roleName: selectedRole?.role_name } : null;
+  const roadmapInput = (): { skillAnalysisId: string; roleId?: string; roleName?: string } | null => analysis ? { skillAnalysisId: analysis.id, roleId: analyzedRoleId, roleName: analyzedRole?.role_name } : null;
 
   const generateRagRoadmap = async (): Promise<void> => {
     const input = roadmapInput();
@@ -89,9 +102,23 @@ export const SkillGapPage = (): JSX.Element => {
       <ErrorMessage>{error}</ErrorMessage><SuccessMessage>{success}</SuccessMessage>
 
       {loading ? <div className="review-loading"><CircleDashed className="spin-icon" size={18} /> Loading career roles and your latest analysis...</div> : <>
-        <section className="skill-gap-control-card"><div><label className="field-label" htmlFor="skill-gap-role">Target job role</label><select id="skill-gap-role" className="auth-input" value={roleId} onChange={(event) => setRoleId(event.target.value)}><option value="">Select a role</option>{roles.map((role) => <option key={role.id} value={role.id}>{role.role_name}</option>)}</select>{selectedRole?.role_description && <p className="form-hint">{selectedRole.role_description}</p>}</div><LoadingButton type="button" loading={analyzing} loadingLabel="Analyzing skills..." onClick={() => { void analyze(); }}><Target size={16} /> Analyze skill gap</LoadingButton></section>
+        <section className="skill-gap-control-card">
+          <div>
+            <label className="field-label" htmlFor="skill-gap-role">Target job role</label>
+            <select id="skill-gap-role" className="auth-input" disabled={!roles.length} value={roleId} onChange={(event) => setRoleId(event.target.value)}>
+              <option value="">{roles.length ? "Select a role" : "No roles available"}</option>
+              {roles.map((role) => <option key={role.id} value={role.id}>{role.role_name}</option>)}
+            </select>
+            {selectedRole?.role_description && <p className="form-hint">{selectedRole.role_description}</p>}
+            {!roles.length && <>
+              <p className="form-hint" role="status">{catalogError ? "Job roles could not load. Try again." : "There are no active job roles right now."}</p>
+              <button type="button" className="button button-secondary" onClick={retryCatalog}>Retry loading roles</button>
+            </>}
+          </div>
+          <LoadingButton type="button" disabled={!selectedRole} loading={analyzing} loadingLabel="Analyzing skills..." onClick={() => { void analyze(); }}><Target size={16} /> Analyze skill gap</LoadingButton>
+        </section>
         {!analysis ? <div className="empty-state-box"><TriangleAlert size={18} /><div><h3>No skill analysis yet</h3><p>Select a target role and compare it with the skills saved in your completed profile.</p></div></div> : <>
-          <div className="skill-gap-metrics"><article className="career-metric-card"><span>Role match</span><strong>{analysis.match_score}%</strong><p>{selectedRole?.role_name ?? "Target role"}</p></article><article className="career-metric-card"><span>Matched skills</span><strong>{analysis.matched_skills.length}</strong><p>Already working in your favor</p></article><article className="career-metric-card"><span>Missing skills</span><strong>{analysis.missing_skills.length}</strong><p>Prioritize these next</p></article></div>
+          <div className="skill-gap-metrics"><article className="career-metric-card"><span>Role match</span><strong>{analysis.match_score}%</strong><p>{analyzedRole?.role_name ?? "Target role"}</p></article><article className="career-metric-card"><span>Matched skills</span><strong>{analysis.matched_skills.length}</strong><p>Already working in your favor</p></article><article className="career-metric-card"><span>Missing skills</span><strong>{analysis.missing_skills.length}</strong><p>Prioritize these next</p></article></div>
           <div className="skill-gap-columns"><section className="skill-result-card"><div className="section-heading"><div><span className="eyebrow">Strengths</span><h2>Matched skills</h2></div><CheckCircle2 size={18} /></div><div className="skill-chip-list">{analysis.matched_skills.length ? analysis.matched_skills.map((skill) => <span className="skill-chip matched" key={skill}>{skill}</span>) : <p className="form-hint">No required skills matched yet. That is useful baseline information.</p>}</div></section><section className="skill-result-card"><div className="section-heading"><div><span className="eyebrow">Gaps</span><h2>Missing skills</h2></div><TriangleAlert size={18} /></div><div className="skill-chip-list">{analysis.missing_skills.length ? analysis.missing_skills.map((skill) => <span className="skill-chip missing" key={skill}>{skill}</span>) : <p className="form-hint">Great coverage. Keep strengthening depth and practical proof.</p>}</div></section></div>
           <section className="learning-order-card">
             <div className="section-heading"><h2>Recommended learning order</h2></div>

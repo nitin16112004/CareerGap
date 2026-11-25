@@ -46,7 +46,7 @@ export const ReviewProfilePage = (): JSX.Element => {
   const [data, setData] = useState<ExtractedResumeData>(emptyData());
   const [record, setRecord] = useState<ResumeRecord | null>(null);
   const [initialExtraction, setInitialExtraction] = useState<ExtractedResumeData | null>(null);
-  const [roles, setRoles] = useState<JobRole[]>([]);
+  const [roles, setRoles] = useState<JobRole[] | null>(null);
   const [targetJobRole, setTargetJobRole] = useState("");
   const [preferredLocation, setPreferredLocation] = useState("");
   const [workPreference, setWorkPreference] = useState<WorkPreference>("hybrid");
@@ -74,7 +74,7 @@ export const ReviewProfilePage = (): JSX.Element => {
         ]);
         if (!active) return;
 
-        if (rolesResult.status === "fulfilled") setRoles(rolesResult.value);
+        setRoles(rolesResult.status === "fulfilled" ? rolesResult.value : null);
 
         let nextData = emptyData();
         if (resumeResult.status === "fulfilled" && resumeResult.value) {
@@ -211,6 +211,8 @@ export const ReviewProfilePage = (): JSX.Element => {
 
   if (loading) return <AuthCard className="onboarding-card" title="Preparing your review"><div className="review-loading"><RefreshCw className="spin-icon" size={22} /> Loading profile details...</div></AuthCard>;
 
+  const selectedCatalogRole = roles?.find((role) => role.role_name === targetJobRole);
+
   return <AuthCard className="onboarding-card" title="Review and complete your career profile" subtitle="Check your details and choose a target role for your skill-gap analysis.">
     <ErrorMessage>{error}</ErrorMessage>
     <SuccessMessage>{saved ? "Resume review saved successfully. Complete the career preferences below when you are ready." : ""}</SuccessMessage>
@@ -229,9 +231,23 @@ export const ReviewProfilePage = (): JSX.Element => {
         <span className="source-badge source-manual">You decide</span>
       </div>
       <div className="review-form-grid">
+        {roles?.length ? (
+          <label className="field-label">Job role catalog
+            <select className="auth-input" value={selectedCatalogRole?.id ?? ""} onChange={(event) => {
+              const role = roles.find((item) => item.id === event.target.value);
+              if (role) setTargetJobRole(role.role_name);
+            }}>
+              <option value="" disabled>Choose a role</option>
+              {roles.map((role) => <option key={role.id} value={role.id}>{role.role_name}</option>)}
+            </select>
+          </label>
+        ) : (
+          <p className="form-hint" role="status">
+            {roles ? "The catalog has no job roles yet." : "The job role catalog is temporarily unavailable."} Enter your target job role to continue.
+          </p>
+        )}
         <label className="field-label">Target job role
-          <input className="auth-input" list="target-job-role-options" value={targetJobRole} onChange={(event) => setTargetJobRole(event.target.value)} placeholder="Frontend Developer" required />
-          <datalist id="target-job-role-options">{roles.map((role) => <option key={role.id} value={role.role_name} />)}</datalist>
+          <input className="auth-input" value={targetJobRole} onChange={(event) => setTargetJobRole(event.target.value)} placeholder="Enter or choose a role" required />
         </label>
         <label className="field-label">Preferred location
           <input className="auth-input" value={preferredLocation} onChange={(event) => setPreferredLocation(event.target.value)} placeholder="Bengaluru, Delhi NCR, Remote" required />

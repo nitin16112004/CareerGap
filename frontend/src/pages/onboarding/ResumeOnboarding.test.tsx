@@ -163,10 +163,55 @@ describe("resume upload onboarding", () => {
   it("loads resume data and saved career preferences into the final review", async () => {
     renderReview();
     expect(await screen.findByDisplayValue("Ava Stone")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("Frontend Engineer")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Target job role" })).toHaveValue("Frontend Engineer");
+    expect(screen.getByRole("combobox", { name: "Job role catalog" })).toHaveValue("role-1");
     expect(screen.getByLabelText("Preferred location")).toHaveValue("Bengaluru");
     expect(screen.getByText("Resume analyzed successfully")).toBeInTheDocument();
     expect(screen.getByText("TypeScript")).toBeInTheDocument();
+  });
+
+  it("shows available job roles before typing and saves the selected role name", async () => {
+    mocked.getProfile.mockResolvedValueOnce({ ...profile, target_job_role: null });
+    mocked.listRoles.mockResolvedValueOnce([
+      { id: "role-1", role_name: "Frontend Engineer", role_slug: "frontend-engineer" },
+      { id: "role-2", role_name: "Data Analyst", role_slug: "data-analyst" },
+    ]);
+    renderReview("/onboarding/review-profile?manual=true");
+
+    const catalog = await screen.findByRole("combobox", { name: "Job role catalog" });
+    const targetRole = screen.getByRole("textbox", { name: "Target job role" });
+    expect(targetRole).toHaveValue("");
+    expect(within(catalog).getByRole("option", { name: "Data Analyst" })).toBeInTheDocument();
+
+    fireEvent.change(catalog, { target: { value: "role-2" } });
+    expect(targetRole).toHaveValue("Data Analyst");
+    fireEvent.click(screen.getByRole("button", { name: /complete onboarding/i }));
+
+    expect(await screen.findByRole("heading", { name: "Onboarding complete" })).toBeInTheDocument();
+    expect(mocked.completeProfile).toHaveBeenCalledWith(expect.objectContaining({ targetJobRole: "Data Analyst" }));
+  });
+
+  it("keeps the saved role editable and saves a custom role when the catalog is unavailable", async () => {
+    mocked.listRoles.mockRejectedValueOnce(new Error("Service unavailable"));
+    renderReview("/onboarding/review-profile?manual=true");
+
+    const targetRole = await screen.findByRole("textbox", { name: "Target job role" });
+    expect(targetRole).toHaveValue("Frontend Engineer");
+    expect(screen.getByText(/job role catalog is temporarily unavailable/i)).toBeInTheDocument();
+
+    fireEvent.change(targetRole, { target: { value: "Accessibility Engineer" } });
+    fireEvent.click(screen.getByRole("button", { name: /complete onboarding/i }));
+
+    expect(await screen.findByRole("heading", { name: "Onboarding complete" })).toBeInTheDocument();
+    expect(mocked.completeProfile).toHaveBeenCalledWith(expect.objectContaining({ targetJobRole: "Accessibility Engineer" }));
+  });
+
+  it("explains an empty role catalog and leaves manual entry available", async () => {
+    mocked.listRoles.mockResolvedValueOnce([]);
+    renderReview("/onboarding/review-profile?manual=true");
+
+    expect(await screen.findByText(/catalog has no job roles yet/i)).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Target job role" })).toBeEnabled();
   });
 
   it("completes onboarding with reviewed resume data and refreshes auth state", async () => {

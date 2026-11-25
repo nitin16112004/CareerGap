@@ -84,11 +84,37 @@ describe("SkillGapPage", () => {
     expect(await screen.findByText(/analysis updated from your current profile/i)).toBeInTheDocument();
   });
 
-  it("generates the basic roadmap and navigates to the created roadmap", async () => {
+  it("keeps the catalog usable when the previous analysis cannot load", async () => {
+    mocked.latest.mockRejectedValueOnce(new Error("Analysis unavailable"));
+    const user = userEvent.setup();
+    renderPage();
+
+    const picker = await screen.findByRole("combobox", { name: /target job role/i });
+    await user.selectOptions(picker, "role-1");
+    await user.click(screen.getByRole("button", { name: /analyze skill gap/i }));
+
+    expect(mocked.analyze).toHaveBeenCalledWith("role-1", undefined);
+  });
+
+  it("shows when the catalog is empty and allows it to reload", async () => {
+    mocked.listRoles.mockResolvedValueOnce([]);
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(await screen.findByText(/no active job roles/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /analyze skill gap/i })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: /retry loading roles/i }));
+
+    expect(await screen.findByRole("option", { name: "Backend Engineer" })).toBeInTheDocument();
+  });
+
+  it("generates a roadmap for the analyzed role when a different role is selected", async () => {
+    mocked.listRoles.mockResolvedValueOnce([role, { id: "role-2", role_name: "Frontend Developer", role_slug: "frontend-developer" }]);
     const user = userEvent.setup();
     renderPage();
     await screen.findByText("50%");
 
+    await user.selectOptions(screen.getByRole("combobox", { name: /target job role/i }), "role-2");
     await user.click(screen.getByRole("button", { name: /use basic plan/i }));
 
     expect(await screen.findByText("ROADMAP_TARGET")).toBeInTheDocument();
