@@ -6,7 +6,7 @@ import type { ResumeJobData } from "../types/resume";
 // No production parsing/authorization code is replaced; only external adapters and result persistence.
 const mocked = vi.hoisted(() => ({
   processor: undefined as undefined | ((job: { id: string; data: ResumeJobData }) => Promise<void>),
-  from: vi.fn(), download: vi.fn(), storageFrom: vi.fn(), save: vi.fn(), fail: vi.fn(), fetch: vi.fn(),
+  from: vi.fn(), download: vi.fn(), info: vi.fn(), storageFrom: vi.fn(), save: vi.fn(), fail: vi.fn(), fetch: vi.fn(),
   readCountsAtDownload: [] as number[],
 }));
 vi.mock("bullmq", () => ({
@@ -72,13 +72,14 @@ const settled = (operation: Promise<unknown>) => operation.then(() => false, () 
 beforeEach(() => {
   vi.clearAllMocks();
   mocked.readCountsAtDownload.length = 0;
-  authoritative({ id: RA, user_id: A, storage_path: pathA, file_url: pathA,
+  authoritative({ id: RA, user_id: A, storage_path: pathA, file_url: pathA, file_name: "owner-a.pdf",
     file_type: "application/pdf", parsing_status: "processing", file_size: 14 });
   mocked.download.mockImplementation(async () => {
     mocked.readCountsAtDownload.push(mocked.from.mock.calls.length);
     return { data: new Blob(["%PDF-1.7\nA sentinel"]), error: null };
   });
-  mocked.storageFrom.mockReturnValue({ download: mocked.download });
+  mocked.info.mockResolvedValue({ data: { id: "object-a", name: pathA, bucketId: "resumes" }, error: null });
+  mocked.storageFrom.mockReturnValue({ download: mocked.download, info: mocked.info });
   mocked.fetch.mockResolvedValue({ ok: true, json: async () => ({ data: { name: "Owner A", skills: [] } }) });
   mocked.save.mockResolvedValue(undefined);
   vi.stubGlobal("fetch", mocked.fetch);
@@ -97,6 +98,13 @@ describe("S1 real resume worker callback", () => {
     await run(job());
     expect(mocked.readCountsAtDownload).toHaveLength(1);
     expect(mocked.readCountsAtDownload[0], "A queued path is not authoritative database state").toBeGreaterThan(0);
+  });
+
+  it("refuses to download when Storage cannot verify the current file", async () => {
+    mocked.info.mockResolvedValue({ data: null, error: null });
+    expect(await settled(run(job()))).toBe(true);
+    expect(mocked.download).not.toHaveBeenCalled();
+    expect(mocked.fetch).not.toHaveBeenCalled();
   });
 
   it("S1-MISSING refuses download when the authoritative row is absent", async () => {

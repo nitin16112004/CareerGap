@@ -1,9 +1,11 @@
 import { getSupabaseStorageClient } from "../config/supabase";
+import { isRoadmapTaskIntent } from "../types/roadmap";
 import type {
     GeneratedRoadmapPayload,
     RoadmapGenerationInput,
     RoadmapGenerationResult,
     RoadmapRecord,
+    RoadmapTaskIntent,
     RoadmapTaskRecord,
     RoadmapWeekRecord,
 } from "../types/roadmap";
@@ -31,7 +33,7 @@ const getOwnedTask = async (userId: string, roadmapId: string, taskId: string): 
     return task as RoadmapTaskRecord;
 };
 
-const saveTaskStatus = async (userId: string, roadmapId: string, taskId: string, status: RoadmapTaskRecord["status"]): Promise<void> => {
+const saveTaskStatus = async (userId: string, roadmapId: string, taskId: string, status: RoadmapTaskIntent): Promise<void> => {
     const { data: updated, error } = await getSupabaseStorageClient().rpc("update_owned_roadmap_task", {
         p_user_id: userId,
         p_roadmap_id: roadmapId,
@@ -411,7 +413,10 @@ export const roadmapService = {
         return data as RoadmapRecord;
     },
 
-    async updateTaskStatus(userId: string, roadmapId: string, taskId: string, nextStatus: RoadmapTaskRecord["status"]): Promise<RoadmapGenerationResult> {
+    async updateTaskStatus(userId: string, roadmapId: string, taskId: string, nextStatus: RoadmapTaskIntent): Promise<RoadmapGenerationResult> {
+        if (!isRoadmapTaskIntent(nextStatus)) {
+            throw new HttpError(400, "A valid task status is required.", "ROADMAP_TASK_STATUS_INVALID");
+        }
         const task = await getOwnedTask(userId, roadmapId, taskId);
         if (nextStatus === "completed" && quizSkillForTask(task)) {
             throw new HttpError(409, "Pass the skill quiz to complete this task.", "ROADMAP_QUIZ_REQUIRED");

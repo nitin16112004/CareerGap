@@ -5,12 +5,11 @@ import { getBullMqConnection } from "../config/redis";
 import { getSupabaseStorageClient } from "../config/supabase";
 import { writeDeadLetter } from "./dead-letter";
 import { ragRoadmapService } from "../services/rag-roadmap.service";
-import type { RoadmapGenerationInput } from "../types/roadmap";
+import { HttpError } from "../utils/http-error";
 
 type RagRoadmapJobData = {
   aiJobId: string;
   userId: string;
-  input: RoadmapGenerationInput;
   billingUsageReserved?: boolean;
 };
 
@@ -24,6 +23,7 @@ const refundTerminalUsage = async (job: Job<RagRoadmapJobData>): Promise<void> =
 };
 
 const syncRetryState = async (job: Job<RagRoadmapJobData>, error: Error): Promise<void> => {
+  if (error instanceof HttpError && (error.code === "RAG_JOB_NOT_FOUND" || error.code === "RAG_JOB_INACTIVE")) return;
   const maxAttempts = job.opts.attempts ?? 1;
   const retryScheduled = job.attemptsMade < maxAttempts;
   const values = retryScheduled
@@ -40,15 +40,20 @@ const syncRetryState = async (job: Job<RagRoadmapJobData>, error: Error): Promis
         completed_at: new Date().toISOString(),
       };
 
-  const { error: updateError } = await getSupabaseStorageClient()
+  const { data: updated, error: updateError } = await getSupabaseStorageClient()
     .from("ai_jobs")
     .update(values)
     .eq("id", job.data.aiJobId)
-    .eq("job_type", "roadmap_rag");
+    .eq("user_id", job.data.userId)
+    .eq("job_type", "roadmap_rag")
+    .in("status", ["queued", "processing"])
+    .select("id")
+    .maybeSingle();
 
   if (updateError) {
     logger.error({ err: updateError, jobId: job.id, aiJobId: job.data.aiJobId, attemptsMade: job.attemptsMade }, "unable to synchronize RAG retry state");
   }
+  if (!updated) return;
 
   if (!retryScheduled) {
     // Jobs queued before the setting was introduced always reserved usage.
@@ -69,14 +74,16 @@ const syncCompletedRetryCount = async (job: Job<RagRoadmapJobData>): Promise<voi
     .from("ai_jobs")
     .update({ retry_count: job.attemptsMade })
     .eq("id", job.data.aiJobId)
-    .eq("job_type", "roadmap_rag");
+    .eq("user_id", job.data.userId)
+    .eq("job_type", "roadmap_rag")
+    .eq("status", "completed");
   if (error) {
     logger.error({ err: error, jobId: job.id, aiJobId: job.data.aiJobId, attemptsMade: job.attemptsMade }, "unable to record successful RAG retry count");
   }
 };
 
 export const roadmapGenerationWorker = new Worker<RagRoadmapJobData>("roadmapGenerationQueue", async (job) => {
-  await ragRoadmapService.process(job.data.aiJobId, job.data.userId, job.data.input);
+  await ragRoadmapService.process(job.data.aiJobId, job.data.userId);
 }, {
   connection: getBullMqConnection(),
   concurrency: getEnv().RUN_QUEUE_WORKERS ? 1 : 2,

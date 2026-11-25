@@ -13,7 +13,7 @@ const jobId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const analysisId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const chain = (data: unknown, table: string) => {
   const q: Record<string, any> = {};
-  for (const key of ["select", "eq", "order", "limit"]) q[key] = vi.fn(() => q);
+  for (const key of ["select", "eq", "in", "order", "limit"]) q[key] = vi.fn(() => q);
   q.maybeSingle = vi.fn(async () => ({ data, error: null }));
   q.update = (patch: unknown) => { mocked.update(table, patch); return q; };
   q.then = (resolve: (value: unknown) => unknown) => Promise.resolve({ data, error: null }).then(resolve);
@@ -44,7 +44,7 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe("S2 RAG job state authority at the existing worker service entry", () => {
   it("S2-JOB-OWNER must not mutate B's job using queued A ownership", async () => {
-    await ragRoadmapService.process(jobId, A, { skillAnalysisId: analysisId }).catch(() => undefined);
+    await expect(ragRoadmapService.process(jobId, A)).rejects.toMatchObject({ code: "RAG_JOB_NOT_FOUND" });
     expect(mocked.update.mock.calls.filter(([table]) => table === "ai_jobs"),
       "Job must be loaded and owner/type checked before changing status/output").toEqual([]);
     expect(mocked.fetch).not.toHaveBeenCalled();
@@ -52,7 +52,7 @@ describe("S2 RAG job state authority at the existing worker service entry", () =
 
   it("S2-JOB-MISSING must not execute or update a nonexistent job", async () => {
     jobQuery = chain(null, "ai_jobs");
-    await ragRoadmapService.process(jobId, A, { skillAnalysisId: analysisId }).catch(() => undefined);
+    await expect(ragRoadmapService.process(jobId, A)).rejects.toMatchObject({ code: "RAG_JOB_NOT_FOUND" });
     expect(mocked.update.mock.calls.filter(([table]) => table === "ai_jobs")).toEqual([]);
     expect(mocked.fetch).not.toHaveBeenCalled();
   });
@@ -64,5 +64,24 @@ describe("S2 RAG job state authority at the existing worker service entry", () =
     expect(jobQuery.eq).toHaveBeenCalledWith("user_id", A);
     expect(jobQuery.eq).toHaveBeenCalledWith("job_type", "roadmap_rag");
     expect(mocked.update).not.toHaveBeenCalled();
+  });
+
+  it("runs a valid owned job using its stored request", async () => {
+    jobQuery = chain({ ...jobRecord, user_id: A, input_payload: { skillAnalysisId: analysisId } }, "ai_jobs");
+
+    await expect(ragRoadmapService.process(jobId, A)).rejects.toMatchObject({ code: "RAG_AI_SERVICE_UNAVAILABLE" });
+
+    expect(mocked.update).toHaveBeenCalledExactlyOnceWith("ai_jobs", expect.objectContaining({ status: "processing" }));
+    expect(jobQuery.eq).toHaveBeenCalledWith("user_id", A);
+    expect(mocked.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not run a completed owned job again", async () => {
+    jobQuery = chain({ ...jobRecord, user_id: A, status: "completed" }, "ai_jobs");
+
+    await expect(ragRoadmapService.process(jobId, A)).resolves.toBeUndefined();
+
+    expect(mocked.update).not.toHaveBeenCalled();
+    expect(mocked.fetch).not.toHaveBeenCalled();
   });
 });

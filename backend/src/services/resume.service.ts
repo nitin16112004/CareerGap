@@ -4,6 +4,7 @@ import { getSupabaseStorageClient } from "../config/supabase";
 import { publicSupabaseStorageUrl } from "../config/supabase-public-url";
 import { createQueue } from "../jobs/queues";
 import { assertResumeUploadAllowed } from "./resume-rate-limit.service";
+import { findOwnedResume, ownedResumeObjectPath, resumeObjectPath, verifyOwnedResumeObject } from "./resume-storage.service";
 import {
   MAX_RESUME_FILE_SIZE,
   RESUME_BUCKET,
@@ -27,34 +28,32 @@ const hasValidSignature = (file: Express.Multer.File, extension: "pdf" | "docx")
   return file.buffer.subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
 };
 
-const toPublicRecord = async (record: ResumeRecord): Promise<ResumeRecord & { signed_url?: string }> => {
-  const { data } = await getSupabaseStorageClient().storage.from(RESUME_BUCKET).createSignedUrl(record.storage_path, 900);
+const toPublicRecord = async (
+  record: ResumeRecord,
+  { storage, path }: Awaited<ReturnType<typeof verifyOwnedResumeObject>>,
+): Promise<ResumeRecord & { signed_url?: string }> => {
+  const { data } = await storage.createSignedUrl(path, 900);
   return data?.signedUrl ? { ...record, signed_url: publicSupabaseStorageUrl(data.signedUrl) } : record;
 };
 
-const findOwnedResume = async (userId: string, resumeId: string): Promise<ResumeRecord> => {
-  const { data, error } = await getSupabaseStorageClient()
-    .from("resumes")
-    .select("*")
-    .eq("id", resumeId)
-    .eq("user_id", userId)
-    .maybeSingle();
-  if (error) throw new HttpError(500, "Unable to load resume.", "RESUME_LOOKUP_FAILED", false);
-  if (!data) throw new HttpError(404, "Resume not found.", "RESUME_NOT_FOUND");
-  return data as ResumeRecord;
-};
-
-const updateOwnedResume = async (userId: string, resumeId: string, patch: Record<string, unknown>): Promise<ResumeRecord> => {
-  const { data, error } = await getSupabaseStorageClient()
+const updateOwnedResume = async (
+  userId: string,
+  resumeId: string,
+  patch: Record<string, unknown>,
+  path: string,
+  status?: ResumeRecord["parsing_status"],
+): Promise<ResumeRecord | null> => {
+  let query = getSupabaseStorageClient()
     .from("resumes")
     .update(patch)
     .eq("id", resumeId)
     .eq("user_id", userId)
-    .select("*")
-    .maybeSingle();
+    .eq("storage_path", path)
+    .eq("file_url", path);
+  if (status) query = query.eq("parsing_status", status);
+  const { data, error } = await query.select("*").maybeSingle();
   if (error) throw new HttpError(500, "Unable to update resume.", "RESUME_UPDATE_FAILED", false);
-  if (!data) throw new HttpError(404, "Resume not found.", "RESUME_NOT_FOUND");
-  return data as ResumeRecord;
+  return data as ResumeRecord | null;
 };
 
 const queueParsingJob = async (job: ResumeJobData): Promise<void> => {
@@ -68,7 +67,7 @@ const queueParsingJob = async (job: ResumeJobData): Promise<void> => {
     await updateOwnedResume(job.userId, job.resumeId, {
       parsing_status: "failed",
       parsing_error: "Unable to queue resume parsing job.",
-    });
+    }, job.storagePath, "processing");
     throw new HttpError(503, "Resume processing is temporarily unavailable. Please try again.", "RESUME_QUEUE_UNAVAILABLE");
   }
 };
@@ -99,7 +98,7 @@ export const resumeService = {
 
     await assertResumeUploadAllowed(userId);
     const resumeId = randomUUID();
-    const storagePath = `${userId}/${resumeId}.${extension}`;
+    const storagePath = resumeObjectPath(userId, resumeId, file.mimetype);
     const storage = getSupabaseStorageClient().storage.from(RESUME_BUCKET);
     const { error: uploadError } = await storage.upload(storagePath, file.buffer, {
       contentType: file.mimetype,
@@ -128,33 +127,49 @@ export const resumeService = {
       throw new HttpError(500, "Unable to save resume metadata.", "RESUME_METADATA_SAVE_FAILED", false);
     }
 
+    const record = data as ResumeRecord;
+    if (ownedResumeObjectPath(record, userId, resumeId) !== storagePath) {
+      throw new HttpError(500, "Unable to verify resume metadata.", "RESUME_METADATA_SAVE_FAILED", false);
+    }
+
     // Only retire the prior active resume after this upload has durable metadata.
     // A failed metadata insert must not leave the user without an active resume.
     await client.from("resumes").update({ is_active: false }).eq("user_id", userId).neq("id", resumeId).eq("is_active", true);
 
     // The explicit process endpoint owns queueing so clients can retry after a
     // transient queue outage without uploading the file again.
-    return { ...(await toPublicRecord(data as ResumeRecord)), queued: false };
+    return { ...(await toPublicRecord(record, { storage, path: storagePath })), queued: false };
   },
 
   async process(userId: string, resumeId: string): Promise<ResumeRecord & { queued: boolean }> {
     const record = await findOwnedResume(userId, resumeId);
-    if (record.parsing_status === "completed") return { ...(await toPublicRecord(record)), queued: false };
-    if (record.parsing_status === "processing") return { ...(await toPublicRecord(record)), queued: true };
+    const object = await verifyOwnedResumeObject(record, userId, resumeId);
+    if (record.parsing_status === "completed" || record.parsing_status === "processing") {
+      return { ...(await toPublicRecord(record, object)), queued: record.parsing_status === "processing" };
+    }
 
-    const processing = await updateOwnedResume(userId, resumeId, { parsing_status: "processing", parsing_error: null });
+    const processing = await updateOwnedResume(userId, resumeId, { parsing_status: "processing", parsing_error: null }, object.path, record.parsing_status);
+    if (!processing) {
+      const current = await findOwnedResume(userId, resumeId);
+      const currentObject = await verifyOwnedResumeObject(current, userId, resumeId);
+      return { ...(await toPublicRecord(current, currentObject)), queued: current.parsing_status === "processing" };
+    }
+    if (ownedResumeObjectPath(processing, userId, resumeId) !== object.path) {
+      throw new HttpError(409, "Resume file changed. Please try again.", "RESUME_FILE_CHANGED");
+    }
     await queueParsingJob({
-      resumeId,
-      userId,
-      storagePath: processing.storage_path,
+      resumeId: processing.id,
+      userId: processing.user_id,
+      storagePath: object.path,
       fileName: processing.file_name,
       fileType: processing.file_type,
     });
-    return { ...(await toPublicRecord(processing)), queued: true };
+    return { ...(await toPublicRecord(processing, object)), queued: true };
   },
 
   async get(userId: string, resumeId: string): Promise<ResumeRecord & { signed_url?: string }> {
-    return toPublicRecord(await findOwnedResume(userId, resumeId));
+    const record = await findOwnedResume(userId, resumeId);
+    return toPublicRecord(record, await verifyOwnedResumeObject(record, userId, resumeId));
   },
 
   async update(userId: string, resumeId: string, input: { extractedData?: Record<string, unknown>; extractedText?: string; extractedSkills?: string[] }): Promise<ResumeRecord & { signed_url?: string }> {
@@ -162,15 +177,25 @@ export const resumeService = {
     if (input.extractedData) patch.extracted_data = input.extractedData as ParsedResumeData;
     if (input.extractedText !== undefined) patch.extracted_text = input.extractedText;
     if (input.extractedSkills) patch.extracted_skills = input.extractedSkills;
-    const record = await updateOwnedResume(userId, resumeId, patch);
-    return toPublicRecord(record);
+    const existing = await findOwnedResume(userId, resumeId);
+    const object = await verifyOwnedResumeObject(existing, userId, resumeId);
+    const record = await updateOwnedResume(userId, resumeId, patch, object.path);
+    if (!record) throw new HttpError(404, "Resume not found.", "RESUME_NOT_FOUND");
+    if (ownedResumeObjectPath(record, userId, resumeId) !== object.path) {
+      throw new HttpError(409, "Resume file changed. Please try again.", "RESUME_FILE_CHANGED");
+    }
+    return toPublicRecord(record, object);
   },
 
   async markProcessingFailed(job: ResumeJobData, message: string): Promise<void> {
-    await updateOwnedResume(job.userId, job.resumeId, { parsing_status: "failed", parsing_error: message });
+    const path = resumeObjectPath(job.userId, job.resumeId, job.fileType);
+    if (job.storagePath !== path) return;
+    await updateOwnedResume(job.userId, job.resumeId, { parsing_status: "failed", parsing_error: message }, path, "processing");
   },
 
   async saveParsedResult(job: ResumeJobData, data: ParsedResumeData): Promise<void> {
+    const path = resumeObjectPath(job.userId, job.resumeId, job.fileType);
+    if (job.storagePath !== path) return;
     const skills = Array.isArray(data.skills) ? data.skills.filter((skill): skill is string => typeof skill === "string") : [];
     await updateOwnedResume(job.userId, job.resumeId, {
       extracted_data: data,
@@ -178,7 +203,7 @@ export const resumeService = {
       extracted_skills: skills,
       parsing_status: "completed",
       parsing_error: null,
-    });
+    }, path, "processing");
   },
 };
 

@@ -264,8 +264,6 @@ export const atsResumeService = {
         const databasePatch: Record<string, unknown> = {};
         if (patch.targetRole !== undefined) databasePatch.target_role = patch.targetRole;
         if (patch.versionName !== undefined) databasePatch.version_name = patch.versionName;
-        if (patch.atsScore !== undefined) databasePatch.ats_score = patch.atsScore;
-        if (patch.atsKeywords !== undefined) databasePatch.ats_keywords = patch.atsKeywords;
         if (patch.resumeContent !== undefined) databasePatch.resume_content = patch.resumeContent;
         databasePatch.updated_at = new Date().toISOString();
 
@@ -282,8 +280,17 @@ export const atsResumeService = {
 
     async deleteGenerated(userId: string, generatedResumeId: string): Promise<void> {
         const record = await getGeneratedResume(userId, generatedResumeId);
+        const exports = [["pdf", record.pdf_storage_path], ["docx", record.docx_storage_path]] as const;
+        const paths = exports.flatMap(([format, path]) => {
+            if (path == null) return [];
+            const [owner, documentId, fileName, ...remaining] = path.split("/");
+            const extension = /^[a-z0-9-]+\.(pdf|docx)$/.exec(fileName ?? "")?.[1];
+            if (owner !== userId || documentId !== generatedResumeId || extension !== format || remaining.length) {
+                throw new HttpError(409, "Unable to verify the generated resume file path.", "ATS_GENERATED_RESUME_STORAGE_PATH_INVALID");
+            }
+            return [path];
+        });
         const client = getSupabaseStorageClient();
-        const paths = [record.pdf_storage_path, record.docx_storage_path].filter((value): value is string => Boolean(value));
         if (paths.length) {
             const { error: storageError } = await client.storage.from("generated-resumes").remove(paths);
             if (storageError) throw new HttpError(502, "Unable to remove generated resume files.", "ATS_GENERATED_RESUME_STORAGE_DELETE_FAILED", false);

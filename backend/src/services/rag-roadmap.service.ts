@@ -6,6 +6,7 @@ import { getSupabaseStorageClient } from "../config/supabase";
 import { createQueue } from "../jobs/queues";
 import type { GeneratedRoadmapPayload, RoadmapGenerationInput, RoadmapGenerationResult, RoadmapTaskRecord, RoadmapWeekRecord } from "../types/roadmap";
 import { HttpError } from "../utils/http-error";
+import { roadmapGenerateSchema } from "../validators/roadmap.validators";
 import { resolveRoadmapQuizSkill } from "./roadmap-quiz-bank";
 
 const RAG_DAILY_LIMIT = 20;
@@ -400,9 +401,22 @@ const writeRagQueryLog = async (input: {
   if (error) console.error("Unable to save RAG query log", { code: input.errorCode ?? "RAG_LOG_FAILED" });
 };
 
-const markJob = async (jobId: string, values: Record<string, unknown>): Promise<void> => {
-  const { error } = await getSupabaseStorageClient().from("ai_jobs").update(values).eq("id", jobId);
+const loadOwnedJob = async (userId: string, jobId: string) => {
+  const { data, error } = await getSupabaseStorageClient().from("ai_jobs").select("*")
+    .eq("id", jobId).eq("user_id", userId).eq("job_type", "roadmap_rag").maybeSingle();
+  if (error) throw new HttpError(500, "Unable to load AI roadmap job.", "RAG_JOB_LOAD_FAILED", false);
+  if (!data || data.id !== jobId.toLowerCase() || data.user_id !== userId.toLowerCase() || data.job_type !== "roadmap_rag") {
+    throw new HttpError(404, "AI roadmap job not found.", "RAG_JOB_NOT_FOUND");
+  }
+  return data;
+};
+
+const markJob = async (userId: string, jobId: string, values: Record<string, unknown>): Promise<void> => {
+  const { data, error } = await getSupabaseStorageClient().from("ai_jobs").update(values)
+    .eq("id", jobId).eq("user_id", userId).eq("job_type", "roadmap_rag")
+    .in("status", ["queued", "processing"]).select("id").maybeSingle();
   if (error) throw new HttpError(500, "Unable to update AI roadmap job state.", "RAG_JOB_UPDATE_FAILED", false);
+  if (!data) throw new HttpError(409, "AI roadmap job is no longer active.", "RAG_JOB_INACTIVE");
 };
 
 export const ragRoadmapService = {
@@ -462,12 +476,12 @@ export const ragRoadmapService = {
       await queue.add("generate-rag-roadmap", {
         aiJobId: aiJob.id,
         userId,
-        input: { ...input, skillAnalysisId: analysis.id },
         billingUsageReserved,
       }, { attempts: 3, backoff: { type: "exponential", delay: 5_000 }, jobId: aiJob.id });
       await queue.close();
     } catch (queueError) {
-      await getSupabaseStorageClient().from("ai_jobs").update({ status: "failed", error_message: "Unable to enqueue roadmap generation." }).eq("id", aiJob.id);
+      await getSupabaseStorageClient().from("ai_jobs").update({ status: "failed", error_message: "Unable to enqueue roadmap generation." })
+        .eq("id", aiJob.id).eq("user_id", userId).eq("job_type", "roadmap_rag").eq("status", "queued");
       throw new HttpError(503, "AI roadmap queue is unavailable.", "RAG_QUEUE_UNAVAILABLE", false);
     }
 
@@ -481,9 +495,15 @@ export const ragRoadmapService = {
     };
   },
 
-  async process(aiJobId: string, userId: string, input: RoadmapGenerationInput): Promise<RoadmapGenerationResult> {
+  async process(aiJobId: string, userId: string): Promise<void> {
+    const job = await loadOwnedJob(userId, aiJobId);
+    if (job.status === "completed" || job.status === "failed") return;
+    const parsed = roadmapGenerateSchema.shape.body.safeParse(job.input_payload);
+    if (!parsed.success) throw new HttpError(400, "AI roadmap job has invalid input.", "RAG_JOB_INPUT_INVALID", false);
+
+    const input = parsed.data;
     const started = Date.now();
-    await markJob(aiJobId, { status: "processing", started_at: new Date().toISOString(), error_message: null });
+    await markJob(userId, aiJobId, { status: "processing", started_at: new Date().toISOString(), error_message: null });
     const profile = await loadProfile(userId);
     const analysis = await loadSkillAnalysis(userId, input.skillAnalysisId ?? null);
     const roleName = resolveRoleName(profile, input);
@@ -522,13 +542,12 @@ export const ragRoadmapService = {
         responseSummary: `${roadmap.title} (${roadmap.duration_weeks ?? 0} weeks)`,
         latencyMs: Date.now() - started,
       });
-      await markJob(aiJobId, {
+      await markJob(userId, aiJobId, {
         status: "completed",
         output_payload: { roadmapId: roadmap.id },
         completed_at: new Date().toISOString(),
         error_message: null,
       });
-      return roadmap;
     } catch (error) {
       const code = error instanceof HttpError ? error.code : "RAG_GENERATION_FAILED";
       if (embedding) {
@@ -548,9 +567,7 @@ export const ragRoadmapService = {
   },
 
   async getJob(userId: string, jobId: string): Promise<RagRoadmapJobResult> {
-    const { data, error } = await getSupabaseStorageClient().from("ai_jobs").select("*").eq("id", jobId).eq("user_id", userId).eq("job_type", "roadmap_rag").maybeSingle();
-    if (error) throw new HttpError(500, "Unable to load AI roadmap job.", "RAG_JOB_LOAD_FAILED", false);
-    if (!data) throw new HttpError(404, "AI roadmap job not found.", "RAG_JOB_NOT_FOUND");
+    const data = await loadOwnedJob(userId, jobId);
     const output = (data.output_payload ?? {}) as { roadmapId?: unknown };
     const roadmapId = typeof output.roadmapId === "string" ? output.roadmapId : null;
     return {

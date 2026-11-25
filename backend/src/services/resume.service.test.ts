@@ -78,6 +78,10 @@ beforeEach(() => {
   mocked.assertUploadAllowed.mockResolvedValue(undefined);
   mocked.storageFrom.mockReturnValue({
     createSignedUrl: vi.fn(async () => ({ data: { signedUrl: "https://signed.example/resume" }, error: null })),
+    info: vi.fn(async (path: string) => ({
+      data: { id: "stored-object", name: path, bucketId: "resumes", contentType: "application/pdf", size: 64 },
+      error: null,
+    })),
     remove: vi.fn(async () => ({ data: [], error: null })),
     upload: vi.fn(async () => ({ data: { path: "stored" }, error: null })),
   });
@@ -112,8 +116,8 @@ describe("resumeService.upload", () => {
   });
 
   it("uploads valid content, saves metadata, and only then retires prior active resumes", async () => {
-    const stored = record();
-    const insert = fluent({ data: stored, error: null });
+    const insert = fluent();
+    insert.single.mockImplementation(async () => ({ data: record(insert.insert.mock.calls[0][0]), error: null }));
     const deactivate = fluent();
     mocked.dbFrom.mockReturnValueOnce(insert).mockReturnValueOnce(deactivate);
 
@@ -124,7 +128,7 @@ describe("resumeService.upload", () => {
     expect(storage.upload).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`^${userId}/[\\w-]+\\.pdf$`)), expect.any(Buffer), expect.objectContaining({ contentType: "application/pdf" }));
     expect(insert.insert).toHaveBeenCalledWith(expect.objectContaining({ user_id: userId, parsing_status: "pending", is_active: true }));
     expect(deactivate.update).toHaveBeenCalledWith({ is_active: false });
-    expect(result).toMatchObject({ id: resumeId, queued: false, signed_url: "https://signed.example/resume" });
+    expect(result).toMatchObject({ storage_path: `${userId}/${result.id}.pdf`, queued: false, signed_url: "https://signed.example/resume" });
   });
 });
 

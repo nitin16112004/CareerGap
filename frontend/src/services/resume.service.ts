@@ -54,12 +54,10 @@ export const resumeService = {
     return apiRequest<GeneratedResumeSnapshot>(`/resume-builder/generated/${id}`);
   },
 
-  async updateGeneratedResume(id: string, patch: Partial<GeneratedResumeSnapshot>): Promise<GeneratedResumeSnapshot> {
+  async updateGeneratedResume(id: string, patch: Partial<Pick<GeneratedResumeSnapshot, "target_role" | "version_name" | "resume_content">>): Promise<GeneratedResumeSnapshot> {
     const body: Record<string, unknown> = {};
     if (patch.target_role !== undefined) body.targetRole = patch.target_role;
     if (patch.version_name !== undefined) body.versionName = patch.version_name;
-    if (patch.ats_score !== undefined) body.atsScore = patch.ats_score;
-    if (patch.ats_keywords !== undefined) body.atsKeywords = patch.ats_keywords;
     if (patch.resume_content !== undefined) body.resumeContent = patch.resume_content;
     return apiRequest<GeneratedResumeSnapshot>(`/resume-builder/generated/${id}`, {
       method: "PATCH",

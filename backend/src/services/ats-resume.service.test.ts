@@ -145,7 +145,7 @@ describe("atsResumeService.generate", () => {
 });
 
 describe("atsResumeService.updateGenerated", () => {
-    it("maps editor camelCase fields to database snake_case columns", async () => {
+    it("maps editable fields to database columns and leaves server-derived ATS data alone", async () => {
         const lookupTable = table();
         lookupTable.maybeSingle.mockResolvedValue({ data: { id: generatedResumeId, user_id: userId }, error: null });
         const updateTable = table();
@@ -160,12 +160,36 @@ describe("atsResumeService.updateGenerated", () => {
             resumeContent: { summary: "User-edited summary" },
         });
 
-        expect(updateTable.update).toHaveBeenCalledWith(expect.objectContaining({
+        expect(updateTable.update).toHaveBeenCalledWith({
             target_role: "Backend Engineer",
             version_name: "Backend v2",
-            ats_score: 71,
-            ats_keywords: ["node"],
             resume_content: { summary: "User-edited summary" },
-        }));
+            updated_at: expect.any(String),
+        });
+    });
+});
+
+describe("atsResumeService.deleteGenerated", () => {
+    it("deletes both exports and their owning record when the file paths match the generated document", async () => {
+        const folder = `${userId}/${generatedResumeId}`;
+        const pdfPath = `${folder}/ava-stone-frontend-engineer.pdf`;
+        const docxPath = `${folder}/ava-stone-backend-engineer.docx`;
+        const lookupTable = table();
+        lookupTable.maybeSingle.mockResolvedValue({
+            data: { id: generatedResumeId, user_id: userId, pdf_storage_path: pdfPath, docx_storage_path: docxPath },
+            error: null,
+        });
+        const deleteTable = table();
+        mocked.from.mockReturnValueOnce(lookupTable).mockReturnValueOnce(deleteTable);
+        const remove = vi.fn().mockResolvedValue({ error: null });
+        mocked.storageFrom.mockReturnValueOnce({ remove });
+
+        await atsResumeService.deleteGenerated(userId, generatedResumeId);
+
+        expect(mocked.storageFrom).toHaveBeenCalledWith("generated-resumes");
+        expect(remove).toHaveBeenCalledExactlyOnceWith([pdfPath, docxPath]);
+        expect(deleteTable.delete).toHaveBeenCalledOnce();
+        expect(deleteTable.eq).toHaveBeenCalledWith("id", generatedResumeId);
+        expect(deleteTable.eq).toHaveBeenCalledWith("user_id", userId);
     });
 });

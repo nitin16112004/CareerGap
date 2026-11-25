@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ROADMAP_TASK_INTENTS } from "../types/roadmap";
 
 export const roadmapGenerateSchema = z.object({
     body: z.object({
@@ -42,9 +43,7 @@ export const roadmapUpdateSchema = z.object({
 
 export const roadmapTaskUpdateSchema = z.object({
     body: z.object({
-        status: z.enum(["pending", "completed", "skipped", "overdue"]).optional(),
-    }).refine((value) => Object.keys(value).length > 0, {
-        message: "Provide a valid task status update.",
+        status: z.enum(ROADMAP_TASK_INTENTS),
     }),
     query: z.record(z.string(), z.unknown()).default({}),
     params: z.object({

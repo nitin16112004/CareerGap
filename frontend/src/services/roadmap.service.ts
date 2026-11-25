@@ -1,5 +1,5 @@
 import { apiRequest } from "./api";
-import type { RoadmapRecord, RoadmapWeekRecord } from "../types/roadmap";
+import type { RoadmapRecord, RoadmapTaskStatus, RoadmapWeekRecord } from "../types/roadmap";
 
 export interface RoadmapTaskCompletionResult {
     id: string;
@@ -117,7 +117,7 @@ export const roadmapService = {
         });
     },
 
-    async updateTaskStatus(roadmapId: string, taskId: string, status: "pending" | "completed" | "skipped" | "overdue"): Promise<RoadmapTaskCompletionResult> {
+    async updateTaskStatus(roadmapId: string, taskId: string, status: Exclude<RoadmapTaskStatus, "overdue">): Promise<RoadmapTaskCompletionResult> {
         return apiRequest<RoadmapTaskCompletionResult>(`/roadmap/${roadmapId}/tasks/${taskId}`, {
             method: "PATCH",
             body: JSON.stringify({ status }),

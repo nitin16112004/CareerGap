@@ -36,10 +36,8 @@ export const atsUpdateSchema = z.object({
     body: z.object({
         targetRole: z.string().trim().min(2).max(200).optional(),
         versionName: z.string().trim().min(1).max(80).optional(),
-        atsScore: z.number().min(0).max(100).optional(),
-        atsKeywords: z.array(z.string().trim().min(1).max(80)).max(200).optional(),
         resumeContent: z.record(z.string(), z.unknown()).optional(),
-    }).refine((value) => Object.keys(value).length > 0, "At least one generated resume field is required"),
+    }).strict().refine((value) => Object.keys(value).length > 0, "At least one generated resume field is required"),
     query: emptyQuery,
     params: z.object({ generatedResumeId }),
 });

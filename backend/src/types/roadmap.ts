@@ -1,4 +1,9 @@
-export type RoadmapTaskStatus = "pending" | "completed" | "skipped" | "overdue";
+export const ROADMAP_TASK_INTENTS = ["pending", "completed", "skipped"] as const;
+export type RoadmapTaskIntent = (typeof ROADMAP_TASK_INTENTS)[number];
+export type RoadmapTaskStatus = RoadmapTaskIntent | "overdue";
+
+export const isRoadmapTaskIntent = (value: unknown): value is RoadmapTaskIntent =>
+    ROADMAP_TASK_INTENTS.some((status) => value === status);
 export type RoadmapGenerationMode = "basic_template" | "rag";
 
 export interface RoadmapResourceLink {

@@ -3,11 +3,10 @@ import { getEnv } from "../config/env";
 import { aiRequest } from "../config/ai-client";
 import { getBullMqConnection } from "../config/redis";
 import { logger } from "../config/logger";
-import { getSupabaseStorageClient } from "../config/supabase";
 import { writeDeadLetter } from "./dead-letter";
 import type { ParsedResumeData, ResumeJobData } from "../types/resume";
-import { RESUME_BUCKET } from "../types/resume";
 import { resumeService } from "../services/resume.service";
+import { findOwnedResume, ownedResumeObjectPath, verifyOwnedResumeObject } from "../services/resume-storage.service";
 
 const parseAiResponse = (body: unknown): ParsedResumeData => {
   if (!body || typeof body !== "object") throw new Error("AI service returned an invalid response");
@@ -18,11 +17,18 @@ const parseAiResponse = (body: unknown): ParsedResumeData => {
 };
 
 const parseResume = async (job: ResumeJobData): Promise<void> => {
-  const { data: file, error: downloadError } = await getSupabaseStorageClient().storage.from(RESUME_BUCKET).download(job.storagePath);
+  const record = await findOwnedResume(job.userId, job.resumeId);
+  if (job.storagePath !== ownedResumeObjectPath(record, job.userId, job.resumeId) || job.fileType !== record.file_type) {
+    throw new Error("Resume job does not match the current file.");
+  }
+  if (record.parsing_status !== "processing") return;
+
+  const { storage, path } = await verifyOwnedResumeObject(record, job.userId, job.resumeId);
+  const { data: file, error: downloadError } = await storage.download(path);
   if (downloadError || !file) throw new Error("Unable to download resume from private storage");
 
   const form = new FormData();
-  form.append("file", new Blob([await file.arrayBuffer()], { type: job.fileType }), job.fileName);
+  form.append("file", new Blob([await file.arrayBuffer()], { type: record.file_type }), record.file_name);
   const response = await aiRequest("/parse-resume", {
     method: "POST",
     body: form,

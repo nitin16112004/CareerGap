@@ -1,5 +1,5 @@
 import type { NextFunction, Request, Response } from "express";
-import type { RoadmapGenerationMode, RoadmapTaskStatus } from "../types/roadmap";
+import { isRoadmapTaskIntent, type RoadmapGenerationMode } from "../types/roadmap";
 import { billingService } from "../services/billing.service";
 import { roadmapService } from "../services/roadmap.service";
 import { roadmapProgressService } from "../services/roadmap-progress.service";
@@ -123,16 +123,10 @@ export const deleteRoadmap = async (request: Request, response: Response, next: 
 export const updateTaskStatus = async (request: Request, response: Response, next: NextFunction): Promise<void> => {
     try {
         const nextStatus = request.body?.status;
-        if (typeof nextStatus !== "string") {
+        if (!isRoadmapTaskIntent(nextStatus)) {
             throw new HttpError(400, "A valid task status is required.", "ROADMAP_TASK_STATUS_INVALID");
         }
-
-        const validStatuses: RoadmapTaskStatus[] = ["pending", "completed", "skipped", "overdue"];
-        if (!validStatuses.includes(nextStatus as RoadmapTaskStatus)) {
-            throw new HttpError(400, "A valid task status is required.", "ROADMAP_TASK_STATUS_INVALID");
-        }
-
-        const result = await roadmapService.updateTaskStatus(userIdFrom(request), roadmapIdFrom(request), taskIdFrom(request), nextStatus as RoadmapTaskStatus);
+        const result = await roadmapService.updateTaskStatus(userIdFrom(request), roadmapIdFrom(request), taskIdFrom(request), nextStatus);
         response.json({ success: true, message: "Roadmap task status updated.", data: result });
     } catch (error) {
         next(error);

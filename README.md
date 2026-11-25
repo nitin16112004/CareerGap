@@ -40,4 +40,4 @@ Install dependencies in each package before running its tests.
 
 Set the Supabase Auth Site URL to the Netlify origin and allow the same three auth paths on that origin. Supabase Auth can use Gmail SMTP for verification and recovery. Optional reminder emails from Render use the Gmail API and need a sender OAuth grant. Free Render services can sleep, which can delay background jobs.
 
-**Release status.** The source includes the current development build. The full backend suite still has outstanding security regression failures, and the public deployment has not passed end-to-end validation.
+**Release checks.** Review Product CI, apply the pending Cloud Supabase migrations, and verify signup, resume processing, and AI roadmaps on the hosted URLs. Gmail reminders require a sender OAuth grant.
